@@ -1,10 +1,10 @@
-#include <iostream>
 #include <vector>
 #include <algorithm>
+#include <iostream>
+#include "camera.h"
 
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
 #include <assert.h>
+#include "kernel_sources.h"
 
 #define __CL_ENABLE_EXCEPTIONS
 //#define __NO_STD_STRING
@@ -13,19 +13,7 @@
 #define CL_USE_DEPRECATED_OPENCL_2_0_APIS
 #include <CL/cl.hpp>
 
-#include "kernel_sources.h"
-
-#ifdef _DEBUG
-#define GL_CALL(fncall) {\
-clear_gl_errors();\
-fncall;\
-if (log_gl_errors(#fncall, __FILE__, __LINE__)) __debugbreak();\
-}
-#else
-#define GL_CALL(fncall) fncall
-#endif // DEBUG
-
-static constexpr uint32_t WIN_W = 640, WIN_H = 480;
+static constexpr uint32_t WIN_W = 960, WIN_H = 640;
 static GLFWwindow* s_window;
 static cl::ImageGL s_texture;
 static cl::Context s_context;
@@ -33,40 +21,7 @@ static cl::CommandQueue s_queue;
 static uint32_t s_pboId = 0;
 static cl::BufferGL s_pBuffer;
 static cl::Program s_program;
-static cl::make_kernel<cl::BufferGL&>* s_kernel;
-
-static bool log_gl_errors(const char* function, const char* file, uint32_t line)
-{
-    static bool found_error = false;
-    while (GLenum error = glGetError())
-    {
-        std::cout << "[OpenGL Error] (0x" << std::hex << error << std::dec << ")";
-#if _DEBUG
-        std::cout << " in " << function << " at " << file << ":" << line;
-#endif // NDEBUG
-        std::cout << std::endl;
-        found_error = true;
-    }
-    if (found_error)
-    {
-        found_error = false;
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-static void clear_gl_errors()
-{
-    // Just loop over and consume all pending errors.
-    GLenum error = glGetError();
-    while (error)
-    {
-        error = glGetError();
-    }
-}
+static cl::make_kernel<cl::BufferGL&, cl_float, cl_float, cl_float, cl_float3>* s_kernel;
 
 static void init_ogl()
 {
@@ -101,6 +56,11 @@ static void init_ogl()
     }
 
     std::cout << "Using OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
+
+    // Register mouse event handlers.
+    GL_CALL(glfwSetCursorPosCallback(s_window, camera::on_mouse_move));
+    GL_CALL(glfwSetMouseButtonCallback(s_window, camera::on_mouse_button));
+    GL_CALL(glfwSetScrollCallback(s_window, camera::on_mouse_scroll));
 }
 
 static void init_ocl()
@@ -124,8 +84,8 @@ static void init_ocl()
         }
         s_context = cl::Context(devices[0], props);
         s_queue = cl::CommandQueue(s_context, devices[0]);
-        s_program = cl::Program(s_context, cl_kernel_sources::noise, true);
-        s_kernel = new cl::make_kernel<cl::BufferGL&>(s_program, "k_add_noise");
+        s_program = cl::Program(s_context, cl_kernel_sources::cube, true);
+        s_kernel = new cl::make_kernel<cl::BufferGL&, cl_float, cl_float, cl_float, cl_float3>(s_program, "k_traceCube");
     }
     catch (cl::Error error)
     {
@@ -140,16 +100,16 @@ static void init_pbo()
     if (s_pboId)
     {
         GL_CALL(clReleaseMemObject(s_pBuffer()));
-        GL_CALL(glDeleteBuffersARB(1, &s_pboId));
+        GL_CALL(glDeleteBuffers(1, &s_pboId));
     }
 
     std::vector<uint32_t> temp(WIN_W * WIN_H);
     std::generate(temp.begin(), temp.end(), []() { return (uint32_t)std::rand(); });
 
-    GL_CALL(glGenBuffersARB(1, &s_pboId));
-    GL_CALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, s_pboId));
-    GL_CALL(glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, WIN_W * WIN_H * sizeof(uint32_t), temp.data(), GL_STREAM_DRAW_ARB));
-    GL_CALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
+    GL_CALL(glGenBuffers(1, &s_pboId));
+    GL_CALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, s_pboId));
+    GL_CALL(glBufferData(GL_PIXEL_UNPACK_BUFFER, WIN_W * WIN_H * sizeof(uint32_t), temp.data(), GL_STREAM_DRAW));
+    GL_CALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
 
     try
     {
@@ -178,7 +138,13 @@ static void render()
         s_queue.finish();
         if (s_kernel)
         {
-            (*s_kernel)(cl::EnqueueArgs(s_queue, cl::NDRange(WIN_W, WIN_H)), s_pBuffer);
+            glm::vec3 ctarget = camera::target();
+            (*s_kernel)(cl::EnqueueArgs(s_queue, cl::NDRange(WIN_W, WIN_H)),
+                s_pBuffer,
+                camera::distance(),
+                camera::theta(),
+                camera::phi(),
+                { ctarget.x, ctarget.y, ctarget.z });
         }
         clEnqueueReleaseGLObjects(s_queue(), 1, &mem, 0, 0, 0);
         s_queue.flush();
@@ -200,19 +166,19 @@ int main()
     while (!glfwWindowShouldClose(s_window))
     {
         render();
-        glClear(GL_COLOR_BUFFER_BIT);
-        glDisable(GL_DEPTH_TEST);
+        GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
+        GL_CALL(glDisable(GL_DEPTH_TEST));
 
-        glRasterPos2i(-1, -1);
-        glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, s_pboId);
-        glDrawPixels(WIN_W, WIN_H, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+        GL_CALL(glRasterPos2i(-1, -1));
+        GL_CALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, s_pboId));
+        GL_CALL(glDrawPixels(WIN_W, WIN_H, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+        GL_CALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
 
         /* Swap front and back buffers */
-        glfwSwapBuffers(s_window);
+        GL_CALL(glfwSwapBuffers(s_window));
 
         /* Poll for and process events */
-        glfwPollEvents();
+        GL_CALL(glfwPollEvents());
     }
 
     glfwTerminate();

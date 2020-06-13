@@ -1,6 +1,8 @@
 #include "camera.h"
 #include <iostream>
+#include <algorithm>
 static constexpr glm::vec3 unit_z = { 0.0f, 0.0f, 1.0f };
+static constexpr float MAX_PHI = 1.5607963267948965f;
 
 void camera::on_mouse_move(GLFWwindow* window, double xpos, double ypos)
 {
@@ -8,8 +10,8 @@ void camera::on_mouse_move(GLFWwindow* window, double xpos, double ypos)
     {
         s_camTheta -= (float)(xpos - s_mousePos[0]) * ORBIT_ANG;
         s_camPhi += (float)(ypos - s_mousePos[1]) * ORBIT_ANG;
-        s_mousePos[0] = xpos;
-        s_mousePos[1] = ypos;
+        s_camPhi = std::min(MAX_PHI, std::max(-MAX_PHI, s_camPhi));
+        capture_mouse_pos(xpos, ypos);
     }
 
     if (s_leftDown)
@@ -27,8 +29,7 @@ void camera::on_mouse_move(GLFWwindow* window, double xpos, double ypos)
         diff /= 20.0f;
         s_camTarget += x * diff.x + y * diff.y;
 
-        s_mousePos[0] = xpos;
-        s_mousePos[1] = ypos;
+        capture_mouse_pos(xpos, ypos);
     }
 }
 
@@ -50,7 +51,7 @@ void camera::on_mouse_button(GLFWwindow* window, int button, int action, int mod
             s_leftDown = false;
     }
 
-    GL_CALL(glfwGetCursorPos(window, &s_mousePos[0], &s_mousePos[1]));
+    GL_CALL(glfwGetCursorPos(window, &s_mousePos.x, &s_mousePos.y));
 }
 
 void camera::on_mouse_scroll(GLFWwindow* window, double xOffset, double yOffset)
@@ -59,6 +60,12 @@ void camera::on_mouse_scroll(GLFWwindow* window, double xOffset, double yOffset)
     static constexpr float zoomDown = 1.0f / zoomUp;
 
     s_camDist *= yOffset > 0 ? zoomDown : zoomUp;
+}
+
+void camera::capture_mouse_pos(double xpos, double ypos)
+{
+    s_mousePos.x = xpos;
+    s_mousePos.y = ypos;
 }
 
 float camera::distance()
@@ -79,37 +86,4 @@ float camera::phi()
 glm::vec3 camera::target()
 {
     return s_camTarget;
-}
-
-bool log_gl_errors(const char* function, const char* file, uint32_t line)
-{
-    static bool found_error = false;
-    while (GLenum error = glGetError())
-    {
-        std::cout << "[OpenGL Error] (0x" << std::hex << error << std::dec << ")";
-#if _DEBUG
-        std::cout << " in " << function << " at " << file << ":" << line;
-#endif // NDEBUG
-        std::cout << std::endl;
-        found_error = true;
-    }
-    if (found_error)
-    {
-        found_error = false;
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-void clear_gl_errors()
-{
-    // Just loop over and consume all pending errors.
-    GLenum error = glGetError();
-    while (error)
-    {
-        error = glGetError();
-    }
 }

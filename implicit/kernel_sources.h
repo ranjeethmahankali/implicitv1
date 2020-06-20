@@ -4,45 +4,74 @@ namespace cl_kernel_sources
 #define DX 0.0001f
 #define BOUND 20.0f
 #define BACKGROUND_COLOR 0xff101010
-#define UINT_TYPE uint
+#define AMB_STEP 0.05f
+#define STEP_FOS 0.9f
+#define UINT32_TYPE uint
+#define UINT8_TYPE uchar
 #define FLT_TYPE float
 #define PACKED __attribute__((packed))
-#define ENT_TYPE_BOX 1
-struct i_box
+#define SRC_REG 1
+#define SRC_VAL 2
+#define ENT_TYPE_CSG        0
+#define ENT_TYPE_BOX        1
+#define ENT_TYPE_SPHERE     2
+#define ENT_TYPE_CYLINDER   3
+#define ENT_TYPE_GYROID     4
+typedef struct PACKED
 {
   FLT_TYPE bounds[6];
-} PACKED;
-#define ENT_TYPE_SPHERE 2
-struct i_sphere
+} i_box;
+typedef struct PACKED
 {
   FLT_TYPE center[3];
   FLT_TYPE radius;
-} PACKED;
-#define ENT_TYPE_GYROID 3
-struct i_gyroid
+} i_sphere;
+typedef struct PACKED
+{
+    FLT_TYPE point1[3];
+    FLT_TYPE point2[3];
+    FLT_TYPE radius;
+} i_cylinder;
+typedef struct PACKED
 {
   FLT_TYPE scale;
   FLT_TYPE thickness;
-} PACKED;
-union i_entity
+} i_gyroid;
+typedef enum
 {
-  struct i_box box;
-  struct i_sphere sphere;
-  struct i_gyroid gyroid;
-};
-struct wrapper
+    OP_NONE = 0,
+    OP_UNION = 1,
+    OP_INTERSECTION = 2,
+    OP_SUBTRACTION = 3,
+    OP_OFFSET = 8,
+} op_type;
+typedef union PACKED
 {
-  union i_entity entity;
-  UINT_TYPE type;
-} PACKED;
+    float blend_radius;
+    float offset_distance;
+} op_data;
+typedef struct PACKED
+{
+    op_type type;
+    op_data data;
+} op_defn;
+typedef struct PACKED
+{
+    op_defn op;
+    UINT32_TYPE left_src;
+    UINT32_TYPE left_index;
+    UINT32_TYPE right_src;
+    UINT32_TYPE right_index;
+    UINT32_TYPE dest;
+} op_step;
 #undef UINT_TYPE
 #undef FLT_TYPE
-float f_entity(global struct wrapper* entities, uint index, float3* pt);
-float f_box(global union i_entity* eptr,
-            float3* pt,
-            global struct wrapper* entities)
+#define CAST_TYPE(type, name, ptr) global type* name = (global type*)ptr
+float f_box(global uchar* packed,
+            float3* pt)
 {
-  global float* bounds = eptr->box.bounds;
+  CAST_TYPE(i_box, box, packed);
+  global float* bounds = box->bounds;
   float val = -FLT_MAX;
   val = max(val, (*pt).x - bounds[3]);
   val = max(val, bounds[0] - (*pt).x);
@@ -52,42 +81,112 @@ float f_box(global union i_entity* eptr,
   val = max(val, bounds[2] - (*pt).z);
   return val;
 }
-float f_sphere(global union i_entity* eptr,
-               float3* pt,
-               global struct wrapper* entities)
+float f_sphere(global uchar* ptr,
+               float3* pt)
 {
-  global float* center = eptr->sphere.center;
-  float radius = eptr->sphere.radius;
-  return length(*pt - (float3)(center[0], center[1], center[2])) - fabs(radius);
+  CAST_TYPE(i_sphere, sphere, ptr);
+  global float* center = sphere->center;
+  float radius = sphere->radius;
+  return (length(*pt -
+                 (float3)(center[0], center[1], center[2])) -
+          fabs(radius));
 }
-float f_gyroid(global union i_entity* eptr,
-               float3* pt,
-               global struct wrapper* entities)
+float f_cylinder(global uchar* ptr,
+                 float3* pt)
 {
-  float scale = eptr->gyroid.scale;
-  float thick = eptr->gyroid.thickness;
+  CAST_TYPE(i_cylinder, cyl, ptr);
+  float3 p1 = (float3)(cyl->point1[0],
+                       cyl->point1[1],
+                       cyl->point1[2]);
+  float3 p2 = (float3)(cyl->point2[0],
+                       cyl->point2[1],
+                       cyl->point2[2]);
+  float3 ln = normalize(p2 - p1);
+  float3 r = p1 - (*pt);
+  float dist = length(r - ln * dot(ln, r)) - fabs(cyl->radius);
+  dist = max(dist, dot(ln, r));
+  r = p2 - (*pt);
+  dist = max(dist, dot(-ln, r));
+  return dist;
+}
+float f_gyroid(global uchar* ptr,
+               float3* pt)
+{
+  CAST_TYPE(i_gyroid, gyroid, ptr);
+  float scale = gyroid->scale;
+  float thick = gyroid->thickness;
   float sx, cx, sy, cy, sz, cz;
   sx = sincos((*pt).x * scale, &cx);
   sy = sincos((*pt).y * scale, &cy);
   sz = sincos((*pt).z * scale, &cz);
-  return (fabs(sx * cy + sy * cz + sz * cx) - thick) / 10.0f;
+  float factor = 4.0f / thick;
+  return (fabs(sx * cy + sy * cz + sz * cx) - thick) / factor;
 }
-float f_entity(global struct wrapper* entities, uint index, float3* pt)
+float f_simple(global uchar* ptr,
+               uchar type,
+               float3* pt)
 {
-  global struct wrapper* wrap = entities + index;
-  uint type = wrap->type;
-  global union i_entity* ent = &(wrap->entity);
   switch (type){
-  case ENT_TYPE_BOX: return f_box(ent, pt, entities);
-  case ENT_TYPE_SPHERE: return f_sphere(ent, pt, entities);
-  case ENT_TYPE_GYROID: return f_gyroid(ent, pt, entities);
-  default: return 1;
+  case ENT_TYPE_BOX: return f_box(ptr, pt);
+  case ENT_TYPE_SPHERE: return f_sphere(ptr, pt);
+  case ENT_TYPE_GYROID: return f_gyroid(ptr, pt);
+  case ENT_TYPE_CYLINDER: return f_cylinder(ptr, pt);
+  default: return 1.0f;
   }
+}
+float apply_op(op_defn op, float a, float b)
+{
+  switch(op.type){
+  case OP_NONE: return a;
+  case OP_UNION: return min(a, b);
+  case OP_INTERSECTION: return max(a, b);
+  case OP_SUBTRACTION: return max(a, -b);
+  case OP_OFFSET: return a - op.data.offset_distance;
+  default: return a;
+  }
+}
+float f_entity(global uchar* packed,
+               global uint* offsets,
+               global uchar* types,
+               local float* valBuf,
+               local float* regBuf,
+               uint nEntities,
+               global op_step* steps,
+               uint nSteps,
+               float3* pt)
+{
+  if (nSteps == 0){
+    if (nEntities > 0)
+      return f_simple(packed, *types, pt);
+    else
+      return 1.0f;
+  }
+  uint bsize = get_local_size(0);
+  uint bi = get_local_id(0);
+  // Compute the values of simple entities.
+  for (uint ei = 0; ei < nEntities; ei++){
+    valBuf[ei * bsize + bi] = f_simple(packed + offsets[ei], types[ei], pt);
+  }
+  // Perform the csg operations.
+  for (uint si = 0; si < nSteps; si++){
+    uint i = steps[si].left_index;
+    float l = steps[si].left_src == SRC_REG ?
+      regBuf[i * bsize + bi] :
+      valBuf[i * bsize + bi];
+    
+    i = steps[si].right_index;
+    float r = steps[si].right_src == SRC_REG ?
+      regBuf[i * bsize + bi] :
+      valBuf[i * bsize + bi];
+    
+    regBuf[steps[si].dest * bsize + bi] = apply_op(steps[si].op, l, r);
+  }
+  
+  return regBuf[bi];
 }
 /*Macro to numerically compute the gradient vector of a given
 implicit function.*/
-#define GRADIENT(func, pt, norm){                    \
-    float v0 = func;                                 \
+#define GRADIENT(func, pt, norm, v0){                \
     pt.x += DX; float vx = func; pt.x -= DX;         \
     pt.y += DX; float vy = func; pt.y -= DX;         \
     pt.z += DX; float vz = func; pt.z -= DX;         \
@@ -103,39 +202,52 @@ uint colorToInt(float3 rgb)
   color |= ((uint)(rgb.z * 255)) << 16;
   return color;
 }
-uint sphere_trace(global struct wrapper* entities,
-                  uint index,
+uint sphere_trace(global uchar* packed,
+                  global uint* offsets,
+                  global uchar* types,
+                  local float* valBuf,
+                  local float* regBuf,
+                  uint nEntities,
+                  global op_step* steps,
+                  uint nSteps,
                   float3 pt,
                   float3 dir,
-                  float* dTotal,
                   int iters,
                   float tolerance)
 {
   dir = normalize(dir);
-  *dTotal = 0.0f;
   float3 norm = (float3)(0.0f, 0.0f, 0.0f);
   bool found = false;
+  float d;
   for (int i = 0; i < iters; i++){
-    float d = f_entity(entities, index, &pt);
+    d = f_entity(packed, offsets, types, valBuf, regBuf,
+                       nEntities, steps, nSteps, &pt);
     if (d < 0.0f) break;
     if (d < tolerance){
-      GRADIENT(f_entity(entities, index, &pt), pt, norm);
+      GRADIENT(f_entity(packed, offsets, types, valBuf, regBuf,
+                        nEntities, steps, nSteps, &pt),
+               pt, norm, d);
       found = true;
       break;
     }
-    pt += dir * d;
-    *dTotal += d;
-    if (i > 5 && (fabs(pt.x) > BOUND ||
+    pt += dir * d * STEP_FOS;
+    if (i > 3 && (fabs(pt.x) > BOUND ||
                   fabs(pt.y) > BOUND ||
                   fabs(pt.z) > BOUND)) break;
   }
-  float d = dot(normalize(norm), -dir);
-  float3 color = (float3)(0.2f,0.2f,0.2f)*(1.0f-d) + (float3)(0.9f,0.9f,0.9f)*d;
-  return found ? colorToInt(color) : BACKGROUND_COLOR;
+  
+  if (!found) return BACKGROUND_COLOR;
+  pt -= dir * AMB_STEP;
+  float amb = (f_entity(packed, offsets, types, valBuf, regBuf,
+                        nEntities, steps, nSteps, &pt) - d) / AMB_STEP;
+  norm = normalize(norm);
+  d = dot(norm, -dir);
+  float cd = 0.2f;
+  float cl = 0.4f * amb + 0.6f;
+  float3 color1 = (float3)(cd, cd, cd)*(1.0f-d) + (float3)(cl, cl, cl)*d;
+  return colorToInt(color1);
 }
-void perspective_project(float camDist,
-                         float camTheta,
-                         float camPhi,
+void perspective_project(float3 camPos,
                          float3 camTarget,
                          uint2 coord,
                          uint2 dims,
@@ -143,9 +255,9 @@ void perspective_project(float camDist,
                          float3* dir)
 {
   float st, ct, sp, cp;
-  st = sincos(camTheta, &ct);
-  sp = sincos(camPhi, &cp);
-  *dir = -(float3)(camDist * cp * ct, camDist * cp * st, camDist * sp);
+  st = sincos(camPos.y, &ct);
+  sp = sincos(camPos.z, &cp);
+  *dir = -(float3)(camPos.x * cp * ct, camPos.x * cp * st, camPos.x * sp);
   *pos = camTarget - (*dir);
   *dir = normalize(*dir);
   /* float3 center = pos - (dir * 0.57735026f); */
@@ -154,62 +266,34 @@ void perspective_project(float camDist,
   float3 x = normalize(cross(*dir, (float3)(0, 0, 1)));
   float3 y = normalize(cross(x, *dir));
   *pos += 1.5f *
-    (x * (((float)coord.x - (float)dims.x / 2.0f) / (float)(dims.x / 2)) +
-     y * (((float)coord.y - (float)dims.y / 2.0f) / (float)(dims.x / 2)));
+    (x * (((float)coord.x - (float)dims.x / 2.0f) / ((float)dims.x / 2.0f)) +
+     y * (((float)coord.y - (float)dims.y / 2.0f) / ((float)dims.x / 2.0f)));
   *dir = normalize((*pos) - center);
 }
-float f_capsule(float3* a, float3* b, float thick, float3* pt)
-{
-  float3 ln = *b - *a;
-  float r = min(1.0f, max(0.0f, dot(ln, *pt - *a) / dot(ln, ln)));
-  return length((*a + ln * r) - *pt) - thick;
-}
-float f_testUnion(float3* bmin, float3* bmax, float radius, float3* pt)
-{
-  float a = length(((*bmin + *bmax) * 0.5f) - *pt) - radius;
-  float b = f_capsule(bmin, bmax, radius * 0.5f, pt);
-  return min(a, b);
-}
-uint trace_all(float3 pt, float3 dir, global struct wrapper* entities, uint nEntities)
-{
-  float dMarch = FLT_MAX;
-  float dBest = FLT_MAX;
-  uint color, colorBest;
-  for (uint i = 0; i < nEntities; i++){
-    color = sphere_trace(entities, i, pt, dir, &dMarch, 500, 0.00001f);
-    if (dMarch < dBest){
-      colorBest = color;
-      dBest = dMarch;
-    }
-  }
-  return colorBest;
-}
-uint trace_one(float3 pt,
-               float3 dir,
-               global struct wrapper* entities,
-               uint entityIndex,
-               uint nEntities){
-  float dMarch = 0.0f;
-  return sphere_trace(entities, entityIndex, pt, dir, &dMarch, 500, 0.00001f);
-}
 kernel void k_trace(global uint* pBuffer, // The pixel buffer
-                    global struct wrapper* entities,
-                    uint entityIndex,
+                    global uchar* packed,
+                    global uchar* types,
+                    global uchar* offsets,
+                    local float* valBuf,
+                    local float* regBuf,
                     uint nEntities,
-                    float camDist,
-                    float camTheta,
-                    float camPhi,
+                    global op_step* steps,
+                    uint nSteps,
+                    float3 camPos, // Camera position in spherical coordinates
                     float3 camTarget)
 {
-  if (entityIndex >= nEntities)
-    return;
   uint2 dims = (uint2)(get_global_size(0), get_global_size(1));
   uint2 coord = (uint2)(get_global_id(0), get_global_id(1));
   float3 pos, dir;
-  perspective_project(camDist, camTheta, camPhi, camTarget,
+  perspective_project(camPos, camTarget,
                       coord, dims, &pos, &dir);
   uint i = coord.x + (coord.y * get_global_size(0));
-  pBuffer[i] = trace_one(pos, dir, entities, entityIndex, nEntities);
+  int iters = 500;
+  float tolerance = 0.00001f;
+  float dTotal = 0;
+  pBuffer[i] = sphere_trace(packed, offsets, types, valBuf, regBuf,
+                            nEntities, steps, nSteps, pos, dir,
+                            iters, tolerance);
 }
 	)";
 

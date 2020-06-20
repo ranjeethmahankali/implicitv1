@@ -1,32 +1,65 @@
-#define ENT_TYPE_BOX 1
-struct i_box
+#define SRC_REG 1
+#define SRC_VAL 2
+
+#define ENT_TYPE_CSG        0
+#define ENT_TYPE_BOX        1
+#define ENT_TYPE_SPHERE     2
+#define ENT_TYPE_CYLINDER   3
+#define ENT_TYPE_GYROID     4
+
+typedef struct PACKED
 {
   FLT_TYPE bounds[6];
-} PACKED;
+} i_box;
 
-#define ENT_TYPE_SPHERE 2
-struct i_sphere
+typedef struct PACKED
 {
   FLT_TYPE center[3];
   FLT_TYPE radius;
-} PACKED;
+} i_sphere;
 
-#define ENT_TYPE_GYROID 3
-struct i_gyroid
+typedef struct PACKED
+{
+    FLT_TYPE point1[3];
+    FLT_TYPE point2[3];
+    FLT_TYPE radius;
+} i_cylinder;
+
+typedef struct PACKED
 {
   FLT_TYPE scale;
   FLT_TYPE thickness;
-} PACKED;
+} i_gyroid;
 
-union i_entity
-{
-  struct i_box box;
-  struct i_sphere sphere;
-  struct i_gyroid gyroid;
-};
 
-struct wrapper
+typedef enum
 {
-  union i_entity entity;
-  UINT_TYPE type;
-} PACKED;
+    OP_NONE = 0,
+    OP_UNION = 1,
+    OP_INTERSECTION = 2,
+    OP_SUBTRACTION = 3,
+
+    OP_OFFSET = 8,
+} op_type;
+
+typedef union PACKED
+{
+    float blend_radius;
+    float offset_distance;
+} op_data;
+
+typedef struct PACKED
+{
+    op_type type;
+    op_data data;
+} op_defn;
+
+typedef struct PACKED
+{
+    op_defn op;
+    UINT32_TYPE left_src;
+    UINT32_TYPE left_index;
+    UINT32_TYPE right_src;
+    UINT32_TYPE right_index;
+    UINT32_TYPE dest;
+} op_step;

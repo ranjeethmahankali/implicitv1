@@ -22,6 +22,7 @@ extern "C"
 #include <iostream>
 #include <algorithm>
 #include <memory>
+#include <unordered_map>
 
 constexpr size_t MAX_ENTITY_COUNT = 32;
 
@@ -29,7 +30,7 @@ namespace entities
 {
     struct entity;
     typedef std::shared_ptr<entity> ent_ref;
-
+    
     struct entity
     {
     protected:
@@ -43,7 +44,7 @@ namespace entities
             uint8_t*& bytes, uint32_t*& offsets, uint8_t*& types, op_step*& steps,
             size_t& entityIndex, size_t& currentOffset, std::optional<uint32_t> reg = std::nullopt) const = 0;
 
-        template <typename T> static ent_ref wrap_simple(T simple)
+        template <typename T> static ent_ref wrap_simple(const T& simple)
         {
             return ent_ref(dynamic_cast<entity*>(new T(simple)));
         };

@@ -1,6 +1,7 @@
 #include "host_primitives.h"
 #include <vector>
 #include <algorithm>
+#include <sstream>
 #pragma warning(push)
 #pragma warning(disable : 26812)
 

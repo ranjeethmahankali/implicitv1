@@ -5,18 +5,20 @@ namespace cl_kernel_sources
 #define BOUND 20.0f
 #define BACKGROUND_COLOR 0xff101010
 #define AMB_STEP 0.05f
-#define STEP_FOS 0.9f
+#define STEP_FOS 0.75f
 #define UINT32_TYPE uint
 #define UINT8_TYPE uchar
 #define FLT_TYPE float
 #define PACKED __attribute__((packed))
 #define SRC_REG 1
 #define SRC_VAL 2
-#define ENT_TYPE_CSG        0
-#define ENT_TYPE_BOX        1
-#define ENT_TYPE_SPHERE     2
-#define ENT_TYPE_CYLINDER   3
-#define ENT_TYPE_GYROID     4
+#define ENT_TYPE_CSG                    0
+#define ENT_TYPE_BOX                    1
+#define ENT_TYPE_SPHERE                 2
+#define ENT_TYPE_CYLINDER               3
+#define ENT_TYPE_HALFSPACE              4
+#define ENT_TYPE_GYROID                 5
+#define ENT_TYPE_SCHWARZ                6
 typedef struct PACKED
 {
   FLT_TYPE bounds[6];
@@ -34,9 +36,19 @@ typedef struct PACKED
 } i_cylinder;
 typedef struct PACKED
 {
+    FLT_TYPE origin[3];
+    FLT_TYPE normal[3];
+} i_halfspace;
+typedef struct PACKED
+{
   FLT_TYPE scale;
   FLT_TYPE thickness;
 } i_gyroid;
+typedef struct PACKED
+{
+    FLT_TYPE scale;
+    FLT_TYPE thickness;
+} i_schwarz;
 typedef enum
 {
     OP_NONE = 0,
@@ -44,11 +56,25 @@ typedef enum
     OP_INTERSECTION = 2,
     OP_SUBTRACTION = 3,
     OP_OFFSET = 8,
+    OP_LINBLEND = 16,
+    OP_SMOOTHBLEND = 17,
 } op_type;
+typedef struct PACKED
+{
+    float p1[3];
+    float p2[3];
+} lin_blend_data;
+typedef struct PACKED
+{
+    float p1[3];
+    float p2[3];
+} smooth_blend_data;
 typedef union PACKED
 {
     float blend_radius;
     float offset_distance;
+    lin_blend_data lin_blend;
+    smooth_blend_data smooth_blend;
 } op_data;
 typedef struct PACKED
 {
@@ -122,6 +148,29 @@ float f_gyroid(global uchar* ptr,
   float factor = 4.0f / thick;
   return (fabs(sx * cy + sy * cz + sz * cx) - thick) / factor;
 }
+float f_schwarz(global uchar* ptr,
+                float3* pt)
+{
+  CAST_TYPE(i_schwarz, lattice, ptr);
+  float scale = lattice->scale;
+  float thick = lattice->thickness;
+  float factor = 8.0f / thick;
+  return (fabs(cos((*pt).x * scale) +
+               cos((*pt).y * scale) +
+               cos((*pt).z * scale)) - thick) / factor;
+}
+float f_halfspace(global uchar* ptr,
+                  float3* pt)
+{
+  CAST_TYPE(i_halfspace, hspace, ptr);
+  float3 origin = (float3)(hspace->origin[0],
+                           hspace->origin[1],
+                           hspace->origin[2]);
+  float3 normal = normalize((float3)(hspace->normal[0],
+                                     hspace->normal[1],
+                                     hspace->normal[2]));
+  return dot((*pt) - origin, -normal);
+}
 float f_simple(global uchar* ptr,
                uchar type,
                float3* pt)
@@ -130,11 +179,44 @@ float f_simple(global uchar* ptr,
   case ENT_TYPE_BOX: return f_box(ptr, pt);
   case ENT_TYPE_SPHERE: return f_sphere(ptr, pt);
   case ENT_TYPE_GYROID: return f_gyroid(ptr, pt);
+  case ENT_TYPE_SCHWARZ: return f_schwarz(ptr, pt);
   case ENT_TYPE_CYLINDER: return f_cylinder(ptr, pt);
+  case ENT_TYPE_HALFSPACE: return f_halfspace(ptr, pt);
   default: return 1.0f;
   }
 }
-float apply_op(op_defn op, float a, float b)
+float apply_linblend(lin_blend_data op, float a, float b, float3* pt)
+{
+    float3 p1 = (float3)(op.p1[0],
+                         op.p1[1],
+                         op.p1[2]);
+    float3 p2 = (float3)(op.p2[0],
+                         op.p2[1],
+                         op.p2[2]);
+    float3 ln = p2 - p1;
+    float modLn = length(ln);
+    ln = normalize(ln);
+    float comp = dot((*pt) - p1, ln) / modLn;
+    comp = min(1.0f, max(0.0f, comp));
+    return (1.0f - comp) * a + comp * b;
+}
+float apply_smoothblend(smooth_blend_data op, float a, float b, float3* pt)
+{
+    float3 p1 = (float3)(op.p1[0],
+                         op.p1[1],
+                         op.p1[2]);
+    float3 p2 = (float3)(op.p2[0],
+                         op.p2[1],
+                         op.p2[2]);
+    float3 ln = p2 - p1;
+    float modLn = length(ln);
+    ln = normalize(ln);
+    float comp = dot((*pt) - p1, ln) / modLn;
+    comp = min(1.0f, max(0.0f, comp));
+    comp = 1.0f / (1.0f + pow(comp / (1.0f - comp), -2.0f));
+    return (1.0f - comp) * a + comp * b;
+}
+float apply_op(op_defn op, float a, float b, float3* pt)
 {
   switch(op.type){
   case OP_NONE: return a;
@@ -142,6 +224,9 @@ float apply_op(op_defn op, float a, float b)
   case OP_INTERSECTION: return max(a, b);
   case OP_SUBTRACTION: return max(a, -b);
   case OP_OFFSET: return a - op.data.offset_distance;
+  case OP_LINBLEND: return apply_linblend(op.data.lin_blend, a, b, pt);
+  case OP_SMOOTHBLEND: return apply_smoothblend(op.data.smooth_blend, a, b, pt);
+    
   default: return a;
   }
 }
@@ -179,7 +264,7 @@ float f_entity(global uchar* packed,
       regBuf[i * bsize + bi] :
       valBuf[i * bsize + bi];
     
-    regBuf[steps[si].dest * bsize + bi] = apply_op(steps[si].op, l, r);
+    regBuf[steps[si].dest * bsize + bi] = apply_op(steps[si].op, l, r, pt);
   }
   
   return regBuf[bi];
@@ -197,9 +282,9 @@ implicit function.*/
 uint colorToInt(float3 rgb)
 {
   uint color = 0xff000000;
-  color |= ((uint)(rgb.x * 255));
-  color |= ((uint)(rgb.y * 255)) << 8;
-  color |= ((uint)(rgb.z * 255)) << 16;
+  color |= ((uint)(min(1.0f, max(0.0f, rgb.x)) * 255));
+  color |= ((uint)(min(1.0f, max(0.0f, rgb.y)) * 255)) << 8;
+  color |= ((uint)(min(1.0f, max(0.0f, rgb.z)) * 255)) << 16;
   return color;
 }
 uint sphere_trace(global uchar* packed,

@@ -84,6 +84,7 @@ namespace entities
         {
             op_defn opdef;
             opdef.type = op;
+            opdef.data.blend_radius = 0;
             return make_csg(l, r, opdef);
         };
 
@@ -95,6 +96,32 @@ namespace entities
             op.type = op_type::OP_OFFSET;
             op.data.offset_distance = distance;
             return ent_ref(new comp_entity(ep, op));
+        };
+
+        template <typename T>
+        static ent_ref make_linblend(T l, T r, glm::vec3 p1, glm::vec3 p2)
+        {
+            op_defn op;
+            op.type = op_type::OP_LINBLEND;
+            op.data.lin_blend =
+            {
+                {p1.x, p1.y, p1.z},
+                {p2.x, p2.y, p2.z},
+            };
+            return ent_ref(new comp_entity(l, r, op));
+        };
+
+        template <typename T>
+        static ent_ref make_smoothblend(T l, T r, glm::vec3 p1, glm::vec3 p2)
+        {
+            op_defn op;
+            op.type = op_type::OP_SMOOTHBLEND;
+            op.data.smooth_blend =
+            {
+                {p1.x, p1.y, p1.z},
+                {p2.x, p2.y, p2.z},
+            };
+            return ent_ref(new comp_entity(l, r, op));
         };
     };
 
@@ -154,6 +181,28 @@ namespace entities
         float thickness;
         gyroid(float scale, float thickness);
         
+        virtual uint8_t type() const;
+        virtual size_t num_render_bytes() const;
+        virtual void write_render_bytes(uint8_t*& bytes) const;
+    };
+
+    struct schwarz : public simp_entity
+    {
+        float scale;
+        float thickness;
+        schwarz(float scale, float thickness);
+
+        virtual uint8_t type() const;
+        virtual size_t num_render_bytes() const;
+        virtual void write_render_bytes(uint8_t*& bytes) const;
+    };
+
+    struct halfspace : public simp_entity
+    {
+        glm::vec3 origin;
+        glm::vec3 normal;
+        halfspace(glm::vec3, glm::vec3);
+
         virtual uint8_t type() const;
         virtual size_t num_render_bytes() const;
         virtual void write_render_bytes(uint8_t*& bytes) const;

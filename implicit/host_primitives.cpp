@@ -180,3 +180,47 @@ void entities::cylinder3::write_render_bytes(uint8_t*& bytes) const
     std::memcpy(bytes, &cyl, sizeof(cyl));
     bytes += sizeof(cyl);
 }
+
+entities::schwarz::schwarz(float s, float t)
+    :scale(s), thickness(t)
+{
+}
+
+uint8_t entities::schwarz::type() const
+{
+    return ENT_TYPE_SCHWARZ;
+}
+
+size_t entities::schwarz::num_render_bytes() const
+{
+    return sizeof(i_schwarz);
+}
+
+void entities::schwarz::write_render_bytes(uint8_t*& bytes) const
+{
+    i_schwarz ient = { scale, thickness };
+    std::memcpy(bytes, &ient, sizeof(ient));
+    bytes += sizeof(ient);
+}
+
+entities::halfspace::halfspace(glm::vec3 o, glm::vec3 n)
+    :origin(o), normal(n)
+{
+}
+
+uint8_t entities::halfspace::type() const
+{
+    return ENT_TYPE_HALFSPACE;
+}
+
+size_t entities::halfspace::num_render_bytes() const
+{
+    return sizeof(i_halfspace);
+}
+
+void entities::halfspace::write_render_bytes(uint8_t*& bytes) const
+{
+    i_halfspace ient = { {origin.x, origin.y, origin.z} , {normal.x, normal.y, normal.z} };
+    std::memcpy(bytes, &ient, sizeof(ient));
+    bytes += sizeof(ient);
+}

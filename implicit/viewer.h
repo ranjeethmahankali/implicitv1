@@ -23,6 +23,8 @@ if (viewer::log_gl_errors(#fncall, __FILE__, __LINE__)) __debugbreak();\
 #define GL_CALL(fncall) fncall
 #endif
 
+constexpr char ARROWS[] = ">>> ";
+
 namespace camera
 {
     float distance();
@@ -35,6 +37,7 @@ namespace camera
     void on_mouse_button(GLFWwindow* window, int button, int action, int mods);
     void on_mouse_scroll(GLFWwindow* window, double xOffset, double yOffset);
     static void capture_mouse_pos(double xpos, double ypos);
+    void get_mouse_pos(uint32_t& x, uint32_t& y);
 }
 
 namespace viewer
@@ -61,6 +64,12 @@ namespace viewer
     void show_entity(entities::ent_ref entity);
 
     void render();
+
+#ifdef CLDEBUG
+    void setdebugmode(bool flag);
+    bool getdebugmode();
+    void debugstep();
+#endif // CLDEBUG
 };
 
 namespace util

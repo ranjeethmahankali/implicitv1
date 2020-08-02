@@ -6,6 +6,15 @@
 #include "kernel_sources.h"
 #include "viewer.h"
 
+#pragma warning(push)
+#pragma warning(disable: 4244)
+#include <boost/gil/image.hpp>
+#include <boost/gil/typedefs.hpp>
+#include <boost/gil/extension/io/bmp.hpp>
+namespace bgil = boost::gil;
+#include <boost/algorithm/string/case_conv.hpp>
+#pragma warning(pop)
+
 #define CATCH_EXIT_CL_ERR catch (cl::Error err)\
 {\
 std::cerr << "OpenCL Error: " << viewer::cl_err_str(err.err()) << std::endl;\
@@ -33,7 +42,7 @@ static GLFWwindow* s_window;
 static cl::ImageGL s_texture;
 static cl::Context s_context;
 static cl::CommandQueue s_queue;
-static uint32_t s_pboId = 0;
+static uint32_t s_pboId = 0; // Pixel buffer to be rendered to screen, controlled by OpenGL.
 static cl::Program s_program;
 static cl::make_kernel<
     cl::BufferGL&, cl::Buffer&, cl::Buffer&, cl::Buffer&, cl::LocalSpaceArg,
@@ -43,7 +52,7 @@ static cl::make_kernel<
 #endif // CLDEBUG
 >* s_kernel;
 
-static cl::BufferGL s_pBuffer; // Pixels to be rendered to the screen.
+static cl::BufferGL s_pBuffer; // Pixels to be rendered to the screen. Controlled by OpenCL.
 static cl::Buffer s_packedBuf; // Packed bytes of simple entities.
 static cl::Buffer s_typeBuf; // The types of simple entities.
 static cl::Buffer s_offsetBuf; // Offsets where the simple entities start in the packedBuf.
@@ -426,6 +435,49 @@ void viewer::render()
     CATCH_EXIT_CL_ERR;
 }
 
+bool viewer::exportframe(const std::string& path)
+{
+    try
+    {
+        size_t nPixels = WIN_W * WIN_H;
+        std::vector<uint8_t> pdata(nPixels * 4); // 4 channels per pixel.
+        {
+            cl_mem mem = s_pBuffer();
+            pause_render_loop();
+            clEnqueueAcquireGLObjects(s_queue(), 1, &mem, 0, 0, 0);
+            s_queue.enqueueReadBuffer(s_pBuffer, true, 0, nPixels * sizeof(uint32_t), pdata.data());
+            clEnqueueReleaseGLObjects(s_queue(), 1, &mem, 0, 0, 0);
+            resume_render_loop();
+        }
+        bgil::rgba8_image_t img(WIN_W, WIN_H);
+        auto dataIt = pdata.cbegin();
+        // We need the flipped view because the y-axis in boost goes from bottom to top.
+        auto flippedView = bgil::flipped_up_down_view(bgil::view(img));
+        auto imgIt = flippedView.begin();
+        auto imgEnd = flippedView.end();
+        while (dataIt != pdata.cend() && imgIt != imgEnd)
+        {
+            uint8_t r = *(dataIt++);
+            uint8_t g = *(dataIt++);
+            uint8_t b = *(dataIt++);
+            uint8_t a = *(dataIt++);
+            *(imgIt++) = bgil::rgba8_pixel_t(r, g, b, a);
+        }
+        if (check_format(path, ".bmp"))
+        {
+            bgil::write_view(path, bgil::view(img), bgil::bmp_tag{});
+        }
+        else
+        {
+            std::cerr << "Cannot export this format." << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+    CATCH_EXIT_CL_ERR;
+}
+
 #ifdef CLDEBUG
 void viewer::setdebugmode(bool flag)
 {
@@ -611,4 +663,11 @@ void viewer::show_entity(entities::ent_ref entity)
     }
 
     viewer::add_render_data(bytes.data(), nBytes, types.data(), offsets.data(), nEntities, steps.data(), nSteps);
+}
+
+bool check_format(const std::string& path, const std::string& ext)
+{
+    std::string pathLower(path);
+    boost::to_lower(pathLower);
+    return pathLower.size() >= ext.size() && pathLower.compare(path.size() - ext.size(), ext.size(), ext) == 0;
 }

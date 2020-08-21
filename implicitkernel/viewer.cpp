@@ -5,7 +5,6 @@
 #include <algorithm>
 #include "kernel_sources.h"
 #include "viewer.h"
-
 #pragma warning(push)
 #pragma warning(disable: 4244)
 #include <boost/gil/image.hpp>
@@ -70,6 +69,7 @@ static size_t s_localMemSize = 0;
 static size_t s_constMemSize = 0;
 static size_t s_maxBufSize = 0;
 static size_t s_maxLocalBufSize = 0;
+static size_t s_maxWorkGroupSize = 0;
 static size_t s_workGroupSize = 0;
 
 static std::mutex s_mutex;
@@ -549,12 +549,12 @@ void viewer::init_ocl()
         }
         s_context = cl::Context(devices[0], props);
         s_queue = cl::CommandQueue(s_context, devices[0]);
-        s_program = cl::Program(s_context, cl_kernel_sources::render, false);
-        s_program.build(
+        s_program = cl::Program(s_context, cl_kernel_sources::render_kernel(), false);
+        std::string optionStr = "-I \"" + cl_kernel_sources::abs_path() + "\"";
 #ifdef CLDEBUG
-            "-D CLDEBUG"
+        optionStr += " -D CLDEBUG";
 #endif // CLDEBUG
-        );
+        s_program.build(optionStr.c_str());
 
         s_kernel = new cl::make_kernel<
             cl::BufferGL&, cl::Buffer&, cl::Buffer&, cl::Buffer&, cl::LocalSpaceArg,
@@ -571,27 +571,8 @@ void viewer::init_ocl()
         s_maxLocalBufSize = s_localMemSize / 4;
         s_valueBuf = cl::Local(s_maxLocalBufSize);
         s_regBuf = cl::Local(s_maxLocalBufSize);
-        size_t width = (size_t)WIN_W;
-
-        std::vector<size_t> factors;
-        auto fIter = std::back_inserter(factors);
-        util::factorize(width, fIter);
-        std::sort(factors.begin(), factors.end());
-
-        s_workGroupSize =
-            std::min(width, std::min(
-                devices[0].getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>(),
-                (size_t)std::ceil(s_maxLocalBufSize / (sizeof(float) * MAX_ENTITY_COUNT))));
-        if (width % s_workGroupSize)
-        {
-            size_t newSize = width;
-            for (size_t f : factors)
-            {
-                newSize /= f;
-                if (newSize <= s_workGroupSize) break;
-            }
-            s_workGroupSize = newSize;
-        }
+        s_maxWorkGroupSize = devices[0].getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>();
+        viewer::set_work_group_size();
     }
     CATCH_EXIT_CL_ERR;
 }
@@ -632,6 +613,34 @@ void viewer::init_buffers()
     CATCH_EXIT_CL_ERR;
 }
 
+void viewer::set_work_group_size()
+{
+    if (s_numCurrentEntities > MAX_ENTITY_COUNT)
+    {
+        throw "too many entities";
+    }
+    size_t nEntities = std::max(1ui64, s_numCurrentEntities);
+    std::vector<size_t> factors;
+    auto fIter = std::back_inserter(factors);
+    size_t width = (size_t)WIN_W;
+    util::factorize(width, fIter);
+    std::sort(factors.begin(), factors.end());
+    s_workGroupSize =
+        std::min(width, std::min(
+            s_maxWorkGroupSize,
+            (size_t)std::ceil(s_maxLocalBufSize / (sizeof(float) * nEntities))));
+    if (width % s_workGroupSize)
+    {
+        size_t newSize = width;
+        for (size_t f : factors)
+        {
+            newSize /= f;
+            if (newSize <= s_workGroupSize) break;
+        }
+        s_workGroupSize = newSize;
+    }
+}
+
 void viewer::pause_render_loop()
 {
     std::lock_guard<std::mutex> lock(s_mutex);
@@ -670,6 +679,7 @@ void viewer::add_render_data(uint8_t* bytes, size_t nBytes, uint8_t* types, uint
         write_buf(s_opStepBuf, steps, nSteps);
         s_numCurrentEntities = nEntities;
         s_opStepCount = nSteps;
+        set_work_group_size();
 
         // Resume the render loop.
         resume_render_loop();

@@ -104,8 +104,8 @@ kernel void k_trace(global uint* pBuffer, // The pixel buffer
                     global uchar* packed, // Bytes of render data for simple bytes.
                     global uchar* types, // Types of simple entities in the csg tree.
                     global uchar* offsets, // The byte offsets of simple entities.
-                    local float* valBuf, // The buffer for local use.
-                    local float* regBuf, // More buffer for local use.
+                    local float4* valBuf, // The buffer for local use.
+                    local float4* regBuf, // More buffer for local use.
                     uint nEntities, // The number of simple entities.
                     global op_step* steps, // CSG steps.
                     uint nSteps, // Number of csg steps.
@@ -132,7 +132,7 @@ kernel void k_trace(global uint* pBuffer, // The pixel buffer
   uint i = coord.x + (coord.y * get_global_size(0));
 
   int iters = 500;
-  float tolerance = 0.00001f;
+  float tolerance = 0.0001f;
 
   if (boundDist > 0.0f){
     pBuffer[i] = sphere_trace(packed, offsets, types, valBuf, regBuf,
@@ -152,7 +152,7 @@ kernel void k_trace(global uint* pBuffer, // The pixel buffer
 #ifdef CLDEBUG
   if (debugFlag){
     printf("Screen coords: (%02d, %02d)\n", mousePos.x, mousePos.y);
-    printf("Color: %08x", pBuffer[i]);
+    printf("Color: %08x\n", pBuffer[i]);
   }
 #endif
 }

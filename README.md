@@ -24,16 +24,16 @@ screen.
 #### Implicit Kernel ####
 
 This module contains all the basic entity types. All entities inherit
-from the class `entity`. The `simple_entity` struct represents simplest
+from `entity`. The `simple_entity` struct represents simplest
 forms of implicit geometry, defined by a single equation. The
 `comp_entity` struct represents geometry that is a result of combining
 two other entities via an operation. The operation can be a boolean
 operation, or a blending operation etc.
 
 Every `entity` has `render_data_size` function which estimates the
-size of the render data for that entity. It has has `copy_render_data`
-function, which copies generates and copies the render data to the
-given destination. This render data is copied to a device buffer,
+size of the render data for that entity. It also has a `copy_render_data`
+function, which generates and copies the render data to the
+given destination. This render data is later copied to a device buffer,
 whenever a new entity is created / has to be shown in the viewer. This
 data is then used by the OpenCL kernel that performs the raytracing.
 
@@ -99,7 +99,7 @@ ent_ref cylinder(...)
 
 You can pan by holding down the left mouse button. You can orbit
 around the center of the screen using the right mouse button. You can
-use the screen wheel to zoom in and out.
+use the scroll wheel to zoom in and out.
 
 The geometry is rendered in grayscale. The faint red, green and blue
 planes represent the bounds of the build volume. All modeling

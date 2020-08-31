@@ -12,10 +12,6 @@
 #endif
 #endif
 
-#define CHECK_NUM_ARGS(argcount, expected, lstate) if (argcount != expected){\
-std::cerr << "The function '" << __FUNCTION_NAME__ << "' expects " << expected << " arguments.\n";\
-luathrow(lstate, "Wrong number of arguments for the function.");}
-
 bool s_shouldExit = false;
 
 template <>

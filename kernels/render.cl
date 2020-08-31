@@ -6,9 +6,16 @@
 
 #define DX 0.0001f
 #define AMB_STEP 0.05f
-#define STEP_FOS 0.5f
+#define STEP_FOS 0.9f
+#define EPSILON 0.0001
 
 #include "kernel_primitives.h"
+
+#define GRADIENT(func, point, val, grad) {                  \
+    point.x += EPSILON; grad.x = (func - val) / EPSILON; point.x -= EPSILON;  \
+    point.y += EPSILON; grad.y = (func - val) / EPSILON; point.y -= EPSILON;  \
+    point.z += EPSILON; grad.z = (func - val) / EPSILON; point.z -= EPSILON;  \
+  }
 
 uint colorToInt(float gray)
 {
@@ -86,8 +93,8 @@ float bound_distance(__constant float* viewerData, float3* pos, float3* dir,
 uint sphere_trace(global uchar* packed,
                   global uint* offsets,
                   global uchar* types,
-                  local float4* valBuf,
-                  local float4* regBuf,
+                  local float* valBuf,
+                  local float* regBuf,
                   uint nEntities,
                   global op_step* steps,
                   uint nSteps,
@@ -108,7 +115,7 @@ uint sphere_trace(global uchar* packed,
   float3 norm = (float3)(0.0f, 0.0f, 0.0f);
   bool found = false;
   float dTotal = 0.0f;
-  float4 d;
+  float d;
   for (int i = 0; i < iters; i++){
     d = f_entity(packed, offsets, types, valBuf, regBuf,
                        nEntities, steps, nSteps, &pt
@@ -117,15 +124,22 @@ uint sphere_trace(global uchar* packed,
 #endif
                  );
 
-    if (d.w < 0.0f && dTotal == 0.0f) break; // Too close to camera.
-    if (d.w < tolerance && (-tolerance) < d.w){
-      norm = normalize((float3)(d.x, d.y, d.z));
+    if (d < 0.0f && dTotal == 0.0f) break; // Too close to camera.
+    if (d < tolerance && (-tolerance) < d){
+      GRADIENT(f_entity(packed, offsets, types, valBuf, regBuf,
+                        nEntities, steps, nSteps, &pt
+#ifdef CLDEBUG
+                        , debugFlag
+#endif
+                        ),
+               pt, d, norm);
+      norm = normalize(norm);
       found = true;
       break;
     }
 
-    pt += dir * (d.w * STEP_FOS);
-    dTotal += d.w * STEP_FOS;
+    pt += dir * (d * STEP_FOS);
+    dTotal += d * STEP_FOS;
     if (i > 3 && dTotal > boundDist) break;
   }
   
@@ -138,17 +152,20 @@ uint sphere_trace(global uchar* packed,
   }
 
   pt -= dir * AMB_STEP;
-  float old = d.w;
+  float old = d;
   d = f_entity(packed, offsets, types, valBuf, regBuf,
                nEntities, steps, nSteps, &pt
 #ifdef CLDEBUG
                , debugFlag
 #endif
                );
-  float amb = (d.w - old) / AMB_STEP;
-  float c = 0.2f + dot(norm, -dir) * (0.4f * amb + 0.4f);
+  float amb = (d - old) / AMB_STEP;
+  float c = 0.2f + dot(norm, -dir) * (0.6f * amb + 0.3f);
 #ifdef CLDEBUG
   if (debugFlag){
+    printf("Gradient: (%.2f, %.2f, %.2f)\n", norm.x, norm.y, norm.z);
+    printf("RayDir:   (%.2f, %.2f, %.2f)\n", -dir.x, -dir.y, -dir.z);
+    printf("Dot: %.2f\n", dot(norm, -dir));
     printf("Floating point color: %.2f\n", c);
   }
 #endif
@@ -198,8 +215,8 @@ kernel void k_trace(global uint* pBuffer, // The pixel buffer
                     global uchar* packed, // Bytes of render data for simple bytes.
                     global uchar* types, // Types of simple entities in the csg tree.
                     global uchar* offsets, // The byte offsets of simple entities.
-                    local float4* valBuf, // The buffer for local use.
-                    local float4* regBuf, // More buffer for local use.
+                    local float* valBuf, // The buffer for local use.
+                    local float* regBuf, // More buffer for local use.
                     uint nEntities, // The number of simple entities.
                     global op_step* steps, // CSG steps.
                     uint nSteps, // Number of csg steps.
@@ -226,7 +243,7 @@ kernel void k_trace(global uint* pBuffer, // The pixel buffer
   uint i = coord.x + (coord.y * get_global_size(0));
 
   int iters = 500;
-  float tolerance = 0.001f;
+  float tolerance = 0.00001f;
 
   if (boundDist > 0.0f){
     pBuffer[i] = sphere_trace(packed, offsets, types, valBuf, regBuf,

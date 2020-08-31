@@ -178,7 +178,7 @@ int lua_c_fn_##FuncName(lua_State* L){\
 return lua_interface::lua_func<TReturn COND_COMMA(HasArgs) MAP_LIST_COND(HasArgs, LUA_ARG_TYPE, __VA_ARGS__)>::call_func(lua_fn_##FuncName, #FuncName, L);\
 }\
 /*Define the function that registers this the above lua C function and all the help information.*/\
-void lua_init_fn##FuncName(lua_State* L){\
+void lua_init_fn_##FuncName(lua_State* L){\
 std::vector<member_info> argsVec = {MAP_LIST_COND(HasArgs, ARG_INFO_INIT, __VA_ARGS__)};\
 s_functionInfos.emplace(#FuncName, func_info(#TReturn, #FuncName, FuncDesc, argsVec));\
 lua_register(L, #FuncName, lua_c_fn_##FuncName);}\
@@ -186,7 +186,7 @@ lua_register(L, #FuncName, lua_c_fn_##FuncName);}\
 /*The sigature of the function declared at the beginning, so that the user of the macro can write the definition.*/\
 TReturn lua_interface::lua_fn_##FuncName(MAP_LIST_COND(HasArgs, LUA_ARG_DECL, __VA_ARGS__))
 
-#define INIT_LUA_FUNC(lstate, name) lua_init_fn##name(lstate);
+#define INIT_LUA_FUNC(lstate, name) lua_init_fn_##name(lstate);
 
 using namespace entities;
 
@@ -203,14 +203,14 @@ LUA_FUNC(void, show, true, "Shows the given entity in the viewer",
 }
 
 LUA_FUNC(ent_ref, box, true, "Creates and returns a box entity",
-    (float, xmin, "The minimum coordinate of the box in the x direction"),
-    (float, ymin, "The minimum coordinate of the box in the y direction"),
-    (float, zmin, "The minimum coordinate of the box in the z direction"),
-    (float, xmax, "The maximum coordinate of the box in the x direction"),
-    (float, ymax, "The maximum coordinate of the box in the y direction"),
-    (float, zmax, "The maximum coordinate of the box in the z direction"))
+    (float, xcenter, "The x coordinate of the center of the box."),
+    (float, ycenter, "The y coordinate of the center of the box."),
+    (float, zcenter, "The z coordinate of the center of the box."),
+    (float, xhalf, "Half-size of the box in the x direction"),
+    (float, yhalf, "Half-size of the box in the y direction"),
+    (float, zhalf, "Half-size of the box in the z direction"))
 {
-    return entity::wrap_simple(box3(xmin, ymin, zmin, xmax, ymax, zmax));
+    return entity::wrap_simple(box3(xcenter, ycenter, zcenter, xhalf, yhalf, zhalf));
 }
 
 LUA_FUNC(ent_ref, sphere, true, "Creates a sphere",
@@ -264,6 +264,7 @@ LUA_FUNC(ent_ref, bunion, true, "Creates a boolean union of the given entities",
     (ent_ref, second, "Second entity"))
 {
     op_defn op;
+    op.data.blend_radius = 0.0f;
     op.type = op_type::OP_UNION;
     return comp_entity::make_csg(first, second, op);
 }
@@ -273,6 +274,7 @@ LUA_FUNC(ent_ref, bintersect, true, "Creates a boolean intersection of the given
     (ent_ref, second, "Second entity"))
 {
     op_defn op;
+    op.data.blend_radius = 0.0f;
     op.type = op_type::OP_INTERSECTION;
     return comp_entity::make_csg(first, second, op);
 }
@@ -282,6 +284,7 @@ LUA_FUNC(ent_ref, bsubtract, true, "Creates a boolean difference of the given en
     (ent_ref, second, "Second entity, to be subtracted"))
 {
     op_defn op;
+    op.data.blend_radius = 0.0f;
     op.type = op_type::OP_SUBTRACTION;
     return comp_entity::make_csg(first, second, op);
 }
@@ -396,6 +399,39 @@ LUA_FUNC(void, help, true, "Shows the detailed help of a single function",
     }
 }
 
+LUA_FUNC(ent_ref, filleted_union, true, "Creates a boolean union of the given entities with the meeting edges filleted",
+    (ent_ref, first, "The first entity"),
+    (ent_ref, second, "The second entity"),
+    (float, filletRadius, "The fillet radius"))
+{
+    op_defn op;
+    op.type = op_type::OP_UNION;
+    op.data.blend_radius = filletRadius;
+    return comp_entity::make_csg(first, second, op);
+}
+
+LUA_FUNC(ent_ref, filleted_intersection, true, "Creates a boolean intersection of the given entities with the meeting edges filleted.",
+    (ent_ref, first, "The first entity"),
+    (ent_ref, second, "The second entity"),
+    (float, filletRadius, "The fillet radius"))
+{
+    op_defn op;
+    op.type = op_type::OP_INTERSECTION;
+    op.data.blend_radius = filletRadius;
+    return comp_entity::make_csg(first, second, op);
+}
+
+LUA_FUNC(ent_ref, filleted_subtraction, true, "Creates a boolean subtraction of the given entities with the meeting edges filleted.",
+    (ent_ref, first, "The first entity"),
+    (ent_ref, second, "The second entity"),
+    (float, filletRadius, "The fillet radius"))
+{
+    op_defn op;
+    op.type = op_type::OP_SUBTRACTION;
+    op.data.blend_radius = filletRadius;
+    return comp_entity::make_csg(first, second, op);
+}
+
 void lua_interface::init_functions()
 {
     lua_State* L = state();
@@ -424,4 +460,7 @@ void lua_interface::init_functions()
     INIT_LUA_FUNC(L, setbounds);
     INIT_LUA_FUNC(L, help_all);
     INIT_LUA_FUNC(L, help);
+    INIT_LUA_FUNC(L, filleted_union);
+    INIT_LUA_FUNC(L, filleted_intersection);
+    INIT_LUA_FUNC(L, filleted_subtraction);
 }

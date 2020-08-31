@@ -36,8 +36,10 @@ static float s_camPhi = CAM_PHI;
 static glm::vec3 s_camTarget = CAM_TARGET;
 static glm::dvec2 s_mousePos = { 0.0, 0.0 };
 
-//static constexpr uint32_t WIN_W = 720, WIN_H = 640;
-static constexpr uint32_t WIN_W = 960, WIN_H = 640;
+static uint8_t s_lowestLOD = 0;
+
+//static constexpr uint32_t WIN_W = 960, WIN_H = 640;
+static constexpr uint32_t WIN_W = 1024, WIN_H = 728;
 //static constexpr uint32_t WIN_W = 1, WIN_H = 1;
 static GLFWwindow* s_window;
 static cl::ImageGL s_texture;
@@ -47,11 +49,12 @@ static uint32_t s_pboId = 0; // Pixel buffer to be rendered to screen, controlle
 static cl::Program s_program;
 static cl::make_kernel<
     cl::BufferGL&, cl::Buffer&, cl::Buffer&, cl::Buffer&, cl::LocalSpaceArg,
-    cl::LocalSpaceArg, cl_uint, cl::Buffer&, cl_uint, cl::Buffer&
+    cl::LocalSpaceArg, cl_uint, cl::Buffer&, cl_uint, cl::Buffer&, cl_uchar
 #ifdef CLDEBUG
     , cl_uint2
 #endif // CLDEBUG
 >* s_kernel;
+static cl::make_kernel<cl::BufferGL&, cl_uchar>* s_repeatPixelKernel;
 
 static cl::BufferGL s_pBuffer; // Pixels to be rendered to the screen. Controlled by OpenCL.
 static cl::Buffer s_packedBuf; // Packed bytes of simple entities.
@@ -59,6 +62,7 @@ static cl::Buffer s_typeBuf; // The types of simple entities.
 static cl::Buffer s_offsetBuf; // Offsets where the simple entities start in the packedBuf.
 static cl::Buffer s_opStepBuf; // Buffer containing csg operators.
 static cl::Buffer s_viewerDataBuf; // Buffer contains viewer data, camera position, direction and build volume bounds.
+static uint8_t s_levelOfDetail = s_lowestLOD;
 static cl::LocalSpaceArg s_valueBuf; // Local buffer for storing the values of implicit functions when computing csg operations.
 static cl::LocalSpaceArg s_regBuf; // Register to store intermediate csg values.
 static size_t s_numCurrentEntities = 0;
@@ -177,6 +181,7 @@ void camera::on_mouse_move(GLFWwindow* window, double xpos, double ypos)
         s_camPhi += (float)(ypos - s_mousePos[1]) * ORBIT_ANG;
         s_camPhi = std::min(MAX_PHI, std::max(-MAX_PHI, s_camPhi));
         capture_mouse_pos(xpos, ypos);
+        viewer::reset_LOD();
     }
 
     if (s_leftDown)
@@ -195,6 +200,7 @@ void camera::on_mouse_move(GLFWwindow* window, double xpos, double ypos)
         s_camTarget += x * diff.x + y * diff.y;
 
         capture_mouse_pos(xpos, ypos);
+        viewer::reset_LOD();
     }
 }
 
@@ -225,6 +231,7 @@ void camera::on_mouse_scroll(GLFWwindow* window, double xOffset, double yOffset)
     static constexpr float zoomDown = 1.0f / zoomUp;
 
     s_camDist *= yOffset > 0 ? zoomDown : zoomUp;
+    viewer::reset_LOD();
 }
 
 void camera::capture_mouse_pos(double xpos, double ypos)
@@ -405,6 +412,7 @@ void viewer::stop()
     GL_CALL(glfwSetWindowShouldClose(s_window, GL_TRUE));
     glfwTerminate();
     delete s_kernel;
+    delete s_repeatPixelKernel;
 }
 
 void viewer::render()
@@ -426,6 +434,7 @@ void viewer::render()
                 mousePos = { x, WIN_H - y };
             }
 #endif // CLDEBUG
+            cl::EnqueueArgs args = cl::EnqueueArgs(s_queue, cl::NDRange(WIN_W, WIN_H), cl::NDRange(s_workGroupSize, 1ui64));
             viewer_data vdata
             {
                 camera::distance(), camera::theta(), camera::phi(),
@@ -434,7 +443,8 @@ void viewer::render()
                 s_maxBounds
             };
             s_queue.enqueueWriteBuffer(s_viewerDataBuf, CL_TRUE, 0, sizeof(vdata), &vdata);
-            (*s_kernel)(cl::EnqueueArgs(s_queue, cl::NDRange(WIN_W, WIN_H), cl::NDRange(s_workGroupSize, 1ui64)),
+            (*s_kernel)(
+                args,
                 s_pBuffer,
                 s_packedBuf,
                 s_typeBuf,
@@ -444,17 +454,34 @@ void viewer::render()
                 (cl_uint)s_numCurrentEntities,
                 s_opStepBuf,
                 (cl_uint)s_opStepCount,
-                s_viewerDataBuf
+                s_viewerDataBuf,
+                (cl_uchar)s_levelOfDetail
 #ifdef CLDEBUG
                 , mousePos
 #endif // CLDEBUG
             );
+            if (s_repeatPixelKernel && s_levelOfDetail > 0)
+            {
+                (*s_repeatPixelKernel)(args, s_pBuffer, (cl_uchar)s_levelOfDetail);
+            }
+            update_LOD();
         }
         clEnqueueReleaseGLObjects(s_queue(), 1, &mem, 0, 0, 0);
         s_queue.flush();
         s_queue.finish();
     }
     CATCH_EXIT_CL_ERR;
+}
+
+void viewer::update_LOD()
+{
+    if (s_levelOfDetail)
+        s_levelOfDetail--;
+}
+
+void viewer::reset_LOD()
+{
+    s_levelOfDetail = s_lowestLOD;
 }
 
 bool viewer::exportframe(const std::string& path)
@@ -510,6 +537,12 @@ void viewer::setbounds(float(&bounds)[6])
     s_maxBounds.z = bounds[5];
 }
 
+void viewer::adaptive_rendermode(uint8_t lod)
+{
+    if (lod > 8) lod = 8;
+    s_lowestLOD = lod;
+}
+
 #ifdef CLDEBUG
 void viewer::setdebugmode(bool flag)
 {
@@ -560,11 +593,13 @@ void viewer::init_ocl()
 
             s_kernel = new cl::make_kernel<
                 cl::BufferGL&, cl::Buffer&, cl::Buffer&, cl::Buffer&, cl::LocalSpaceArg,
-                cl::LocalSpaceArg, cl_uint, cl::Buffer&, cl_uint, cl::Buffer&
+                cl::LocalSpaceArg, cl_uint, cl::Buffer&, cl_uint, cl::Buffer&, cl_uchar
 #ifdef CLDEBUG
                 , cl_uint2
 #endif // CLDEBUG
             >(s_program, "k_trace");
+
+            s_repeatPixelKernel = new cl::make_kernel<cl::BufferGL&, cl_uchar>(s_program, "k_repeatPixels");
         }
         catch (cl::Error error)
         {

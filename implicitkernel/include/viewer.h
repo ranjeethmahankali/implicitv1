@@ -100,8 +100,11 @@ namespace viewer
     void show_entity(entities::ent_ref entity);
 
     void render();
+    void update_LOD();
+    void reset_LOD();
     bool exportframe(const std::string& path);
     void setbounds(float(&bounds)[6]);
+    void adaptive_rendermode(uint8_t lod);
 
 #ifdef CLDEBUG
     void setdebugmode(bool flag);

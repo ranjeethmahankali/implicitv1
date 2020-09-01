@@ -10,6 +10,8 @@ try and make plugins to integrate this with other modeling software.
 
 ## Architecture
 
+The CLI application is later renamed to `implicitshell`.
+
 ![Architecture](architecture.png)
 
 #### OpenCL and OpenGL
@@ -43,7 +45,7 @@ variables. The Lua garbage collector will take care of releasing the
 reference and cleaning up the heap allocated memory so the user
 doesn't have to think about that.
 
-#### Implicit CLI (REPL) Application ####
+#### Implicit-Shell Application ####
 
 This module has several C functions, which are bound to lua. These
 functions depend on the Implicit Kernel to do the user's bidding.
@@ -58,7 +60,7 @@ you can just build it.
 
 ## Using the application ##
 
-Once the solution is built, just run the `implicit.exe`. You will see
+Once the solution is built, just run the `implicitshell.exe`. You will see
 a REPL interface that begins with `>>>`. Because this is a Lua
 console, you can do basic lua stuff, create variables, do math etc. If
 you want to see all the function bindings from the implicit kernel,

@@ -18,11 +18,11 @@ extern "C"
 };
 
 #include <glm/glm.hpp>
-#include <optional>
 #include <iostream>
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 constexpr size_t MAX_ENTITY_COUNT = 32;
 
@@ -62,7 +62,16 @@ namespace entities
          * \param nEntities The number of simple entities to be rendered.
          * \param nSteps Number csg operations in the csg tree of this entity.
          */
-        virtual void render_data_size(size_t& nBytes, size_t& nEntities, size_t& nSteps) const = 0;
+        virtual void render_data_size(size_t& nBytes, size_t& nEntities, size_t& nSteps) const;
+
+        /**
+         * \brief Copies the render data into the given destination buffers.
+         * \param bytes The render data will be written to this buffer.
+         * \param offsets The byte offsets of the simple entities (in the above buffer).
+         * \param types The types of simple entities.
+         * \param steps The csg steps to be performed on the simple entities.
+         */
+        void copy_render_data(uint8_t*& bytes, uint32_t*& offsets, uint8_t*& types, op_step*& steps) const;
 
         /**
          * \brief Copies the render data into the given destination buffers.
@@ -74,9 +83,12 @@ namespace entities
          * \param currentOffset For internal use.
          * \param reg For internal use.
          */
-        virtual void copy_render_data(
+        virtual void copy_render_data_internal(
             uint8_t*& bytes, uint32_t*& offsets, uint8_t*& types, op_step*& steps,
-            size_t& entityIndex, size_t& currentOffset, std::optional<uint32_t> reg = std::nullopt) const = 0;
+            size_t& entityIndex, size_t& currentOffset, uint32_t reg,
+            std::unordered_map<entity*, uint32_t>& regMap) const = 0;
+
+        virtual void render_data_size_internal(size_t& nBytes, size_t& nSteps, std::unordered_set<entity*>& simpleEntities) const = 0;
 
         /**
          * \brief Returns a reference to the copy of the given entity.
@@ -118,10 +130,11 @@ namespace entities
     public:
         virtual bool simple() const;
         virtual uint8_t type() const;
-        virtual void render_data_size(size_t& nBytes, size_t& nEntities, size_t& nSteps) const;
-        virtual void copy_render_data(
+        virtual void render_data_size_internal(size_t& nBytes, size_t& nSteps, std::unordered_set<entity*>& simpleEntities) const;
+        virtual void copy_render_data_internal(
             uint8_t*& bytes, uint32_t*& offsets, uint8_t*& types, op_step*& steps,
-            size_t& entityIndex, size_t& currentOffset, std::optional<uint32_t> reg = std::nullopt) const;
+            size_t& entityIndex, size_t& currentOffset, uint32_t reg,
+            std::unordered_map<entity*, uint32_t>& regMap) const;
 
         comp_entity(const comp_entity&) = delete;
         const comp_entity& operator=(const comp_entity&) = delete;
@@ -240,12 +253,13 @@ namespace entities
         simp_entity() = default;
 
         virtual bool simple() const;
-        virtual void render_data_size(size_t& nBytes, size_t& nEntities, size_t& nSteps) const;
+        virtual void render_data_size_internal(size_t& nBytes, size_t& nSteps, std::unordered_set<entity*>& simpleEntities) const;
         virtual size_t num_render_bytes() const = 0;
         virtual void write_render_bytes(uint8_t*& bytes) const = 0;
-        virtual void copy_render_data(
+        virtual void copy_render_data_internal(
             uint8_t*& bytes, uint32_t*& offsets, uint8_t*& types, op_step*& steps,
-            size_t& entityIndex, size_t& currentOffset, std::optional<uint32_t> reg = std::nullopt) const;
+            size_t& entityIndex, size_t& currentOffset, uint32_t reg,
+            std::unordered_map<entity*, uint32_t>& regMap) const;
     };
 
     /**

@@ -54,9 +54,25 @@ function.
 
 ## Building the Solution ##
 
-Its a standard Visual Studio solution that uses NuGet
-packages. All dependencies and prop files are included in the repo and
-you can just build it.
+Its a standard Visual Studio solution.
+Some of the dependencies are included in the repo with a props file
+
+* LightOCLSDK (opencl.props)
+
+And you should install the other dependencies using vcpkg
+
+```
+vcpkg install glm:x64-windows-static
+vcpkg install lua:x64-windows-static
+vcpkg install boost-gil:x64-windows-static
+vcpkg install boost-algorithm:x64-windows-static
+vcpkg install glfw3:x64-windows-static
+vcpkg install glew:x64-windows-static
+
+vcpkg integrate install
+```
+
+You should be able to build the solution after installing the above dependencies
 
 ## Using the application ##
 

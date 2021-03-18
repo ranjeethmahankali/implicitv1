@@ -6,9 +6,9 @@
 // Function name macro for logging purposes.
 #ifndef __FUNCTION_NAME__
 #ifdef _MSC_VER //WINDOWS
-#define __FUNCTION_NAME__   __FUNCTION__
+#define __FUNCTION_NAME__ __FUNCTION__
 #else
-#error Define the function name macro for non windows platform.
+#define __FUNCTION_NAME__ __func__
 #endif
 #endif
 
@@ -153,13 +153,13 @@ void implicit_lua::func_info::show_help(bool detailed) const
 static std::unordered_map<std::string, implicit_lua::func_info> s_functionInfos;
 
 #define _LUA_ARG_TYPE(type, name, desc) type
-#define LUA_ARG_TYPE(arg_tuple) _LUA_ARG_TYPE##arg_tuple
+#define LUA_ARG_TYPE(arg_tuple) _LUA_ARG_TYPE arg_tuple
 
 #define _LUA_ARG_DECL(type, name, desc) type name
-#define LUA_ARG_DECL(arg_tuple) _LUA_ARG_DECL##arg_tuple
+#define LUA_ARG_DECL(arg_tuple) _LUA_ARG_DECL arg_tuple
 
 #define _ARG_INFO_INIT(type, name, desc) {#type, #name, desc}
-#define ARG_INFO_INIT(arg_tuple) _ARG_INFO_INIT##arg_tuple
+#define ARG_INFO_INIT(arg_tuple) _ARG_INFO_INIT arg_tuple
 
 #ifdef LUA_FUNC
 #error "The macro is already defined."
@@ -239,6 +239,28 @@ LUA_FUNC(ent_ref, halfspace, true, "Creates a halfspace defined by a plane",
     (float, znormal, "The z coordinate of the normal of the plane"))
 {
     return entities::entity::wrap_simple(entities::halfspace({ xorigin, yorigin, zorigin }, { xnormal, ynormal, znormal }));
+}
+
+LUA_FUNC(ent_ref, polyface4, true, "Create a polyface with 4 vertices",
+    (float, x1, "The x coordinate of vertex 1"),
+    (float, y1, "The y coordinate of vertex 1"),
+    (float, z1, "The z coordinate of vertex 1"),
+    (float, x2, "The x coordinate of vertex 2"),
+    (float, y2, "The y coordinate of vertex 2"),
+    (float, z2, "The z coordinate of vertex 2"),
+    (float, x3, "The x coordinate of vertex 3"),
+    (float, y3, "The y coordinate of vertex 3"),
+    (float, z3, "The z coordinate of vertex 3"),
+    (float, x4, "The x coordinate of vertex 4"),
+    (float, y4, "The y coordinate of vertex 4"),
+    (float, z4, "The z coordinate of vertex 4"))
+{
+    return entities::entity::wrap_simple(entities::polyface<4>({{
+        {x1, y1, z1},
+        {x2, y2, z2},
+        {x3, y3, z3},
+        {x4, y4, z4},
+    }}));
 }
 
 LUA_FUNC(ent_ref, gyroid, true, "Creates a gyroid lattice",
@@ -453,6 +475,7 @@ void implicit_lua::init_functions()
     INIT_LUA_FUNC(L, sphere);
     INIT_LUA_FUNC(L, cylinder);
     INIT_LUA_FUNC(L, halfspace);
+    INIT_LUA_FUNC(L, polyface4);
     INIT_LUA_FUNC(L, gyroid);
     INIT_LUA_FUNC(L, schwarz);
     INIT_LUA_FUNC(L, bunion);

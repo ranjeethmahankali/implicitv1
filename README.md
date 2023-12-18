@@ -46,20 +46,7 @@ functions depend on the Implicit Kernel to do the user's bidding.
 The user can also load external lua scripts using the `load`
 function.
 
-## Building the Solution ##
-
-You should first install the following dependencies using vcpkg
-
-```
-vcpkg install glm:x64-windows-static
-vcpkg install lua:x64-windows-static
-vcpkg install boost-gil:x64-windows-static
-vcpkg install boost-algorithm:x64-windows-static
-vcpkg install glfw3:x64-windows-static
-vcpkg install glew:x64-windows-static
-
-vcpkg integrate install
-```
+## Build ##
 
 The environment variable `VCPKG_PATH` must be set to the root directory of vcpkg.
 Then build the project using cmake:
@@ -69,6 +56,12 @@ cmake -S . -B build/
 cmake --build build/ --config Release
 ```
 The binaries should be built to `build/Release/` directory.
+
+OR, you can just run the helper script:
+
+```
+./build.sh Release
+```
 
 ## Using the application ##
 
@@ -134,7 +127,7 @@ just a few commands.
 >>> part = smoothblend(bl, lat, 0, 0, -1, 0, 0, 5)
 ```
 
-![Example](example.png)
+![Example](gyroid_cylinder.png)
 
 ## P.S.
 

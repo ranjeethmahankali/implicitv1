@@ -1,0 +1,14 @@
+{
+  "name": "implicitv1",
+  "version-string": "0.0.0",
+  "dependencies": [
+    "glm",
+    "lua",
+    "boost-gil",
+    "boost-algorithm",
+    "glfw3",
+    "glew",
+    "opencl"
+  ],
+  "builtin-baseline": "3d8f78171a2a37d461077bf8d063256b63e25a4f"
+}

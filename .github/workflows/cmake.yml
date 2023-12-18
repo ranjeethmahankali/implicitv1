@@ -1,37 +1,64 @@
 name: CMake
 
-# Do not use any other type of trigger here. Using a pull-request trigger in public
-# repos allows anyone to fork / create a pull request and run malicious code on
-# the runner.
-on: [push]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 env:
   BUILD_TYPE: Release
-  PSExecutionPolicyPreference: Unrestricted
 
 jobs:
   build_and_test:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v2
       with:
         lfs: 'true'
 
-    - name: Create Build Environment
-      run: cmake -E make_directory ${{github.workspace}}/build
+    - name: Install Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y gcc-11 g++-11
+        sudo apt install -y inotify-tools libxmu-dev libxi-dev libgl-dev
+        sudo apt install -y libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev
 
-    - name: Configure CMake
-      shell: cmd
-      working-directory: ${{github.workspace}}/build
-      run: cmake %GITHUB_WORKSPACE% -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+    - name: Cache Vcpkg Packages
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-vcpkg
+      with:
+        path: |
+          ${{github.workspace}}/vcpkg/
+          ${{github.workspace}}/${{env.BUILD_TYPE}}/vcpkg_installed/
+          !${{github.workspace}}/vcpkg/buildtrees
+          !${{github.workspace}}/vcpkg/packages
+          !${{github.workspace}}/vcpkg/downloads
+        key: ${{runner.os}}-build-${{env.cache-name}}-${{hashFiles('**/vcpkg.json')}}
+
+    - name: Setup Vcpkg
+      working-directory: ${{github.workspace}}
+      run: |
+        if [ ! -d "${{github.workspace}}/vcpkg" ]; then
+        git clone https://github.com/microsoft/vcpkg.git
+        fi
+        if [ ! -f "${{github.workspace}}/vcpkg/vcpkg" ]; then
+        sh vcpkg/bootstrap-vcpkg.sh
+        fi
+      env:
+        VCPKG_TARGET_TRIPLET: x64-linux
 
     - name: Build
-      working-directory: ${{github.workspace}}/build
-      shell: cmd
-      run: cmake --build . --config %BUILD_TYPE%
+      working-directory: ${{github.workspace}}
+      run: |
+        bash build.sh ${{env.BUILD_TYPE}} all 4
+      env:
+        VCPKG_PATH: ${{github.workspace}}/vcpkg
+        CC: gcc-11
+        CXX: g++-11
 
     - name: Test
-      working-directory: ${{github.workspace}}/build
-      shell: cmd
-      run: ctest -C %BUILD_TYPE%
+      working-directory: ${{github.workspace}}/${{env.BUILD_TYPE}}
+      run: ctest -C ${{env.BUILD_TYPE}} --rerun-failed --output-on-failure

@@ -34,14 +34,8 @@ find_package(OpenGL REQUIRED)
 file(GLOB IMPLICITKERNEL_SRC "src/implicitkernel/*.cpp")
 add_library(implicitkernel ${IMPLICITKERNEL_SRC})
 
-if (WIN32)
-  target_include_directories(implicitkernel PUBLIC
-    dependencies/lightOCLSDK/include)
-  set(OPENCL_LIB ${CMAKE_SOURCE_DIR}/dependencies/lightOCLSDK/lib/x86_64/OpenCL.lib)
-else()
-  find_package(OpenCL REQUIRED)
-  set(OPENCL_LIB OpenCL::OpenCL)
-endif(WIN32)
+find_package(OpenCL REQUIRED)
+set(OPENCL_LIB OpenCL::OpenCL)
 
 if(WIN32)
   set(SHLWAPI_LIB shlwapi)
